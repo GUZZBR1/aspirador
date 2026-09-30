@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="casa">
+    <physics name="mvp_physics" type="ignored"><max_step_size>0.002</max_step_size><real_time_factor>1.0</real_time_factor></physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"><render_engine>ogre2</render_engine></plugin>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+    <scene><ambient>0.65 0.65 0.65 1</ambient><background>0.86 0.88 0.90 1</background><shadows>true</shadows></scene>
+    <light name="sun" type="directional"><pose>0 0 8 0 0 0</pose><cast_shadows>true</cast_shadows><direction>-0.4 0.2 -1</direction><diffuse>0.8 0.8 0.8 1</diffuse><specular>0.2 0.2 0.2 1</specular></light>
+    <model name="floor"><static>true</static><link name="floor_link"><collision name="floor_collision"><geometry><box><size>8.2 6.2 0.08</size></box></geometry><pose>0 0 -0.04 0 0 0</pose></collision><visual name="floor_visual"><geometry><box><size>8.2 6.2 0.08</size></box></geometry><pose>0 0 -0.04 0 0 0</pose><material><ambient>0.72 0.69 0.62 1</ambient><diffuse>0.72 0.69 0.62 1</diffuse></material></visual></link></model>
+    <model name="house_walls"><static>true</static>
+      <link name="walls">
+        <collision name="north"><pose>0 3.05 1.2 0 0 0</pose><geometry><box><size>8.2 0.12 2.4</size></box></geometry></collision><visual name="north_v"><pose>0 3.05 1.2 0 0 0</pose><geometry><box><size>8.2 0.12 2.4</size></box></geometry></visual>
+        <collision name="south"><pose>0 -3.05 1.2 0 0 0</pose><geometry><box><size>8.2 0.12 2.4</size></box></geometry></collision><visual name="south_v"><pose>0 -3.05 1.2 0 0 0</pose><geometry><box><size>8.2 0.12 2.4</size></box></geometry></visual>
+        <collision name="west"><pose>-4.05 0 1.2 0 0 0</pose><geometry><box><size>0.12 6.2 2.4</size></box></geometry></collision><visual name="west_v"><pose>-4.05 0 1.2 0 0 0</pose><geometry><box><size>0.12 6.2 2.4</size></box></geometry></visual>
+        <collision name="east"><pose>4.05 0 1.2 0 0 0</pose><geometry><box><size>0.12 6.2 2.4</size></box></geometry></collision><visual name="east_v"><pose>4.05 0 1.2 0 0 0</pose><geometry><box><size>0.12 6.2 2.4</size></box></geometry></visual>
+    <!-- Partition west/east, with a 1.2 m doorway centered near y=-0.4. -->
+        <collision name="partition_a"><pose>0 -2.05 1.2 0 0 0</pose><geometry><box><size>0.12 1.9 2.4</size></box></geometry></collision><visual name="partition_a_v"><pose>0 -2.05 1.2 0 0 0</pose><geometry><box><size>0.12 1.9 2.4</size></box></geometry></visual>
+        <collision name="partition_b"><pose>0 1.6 1.2 0 0 0</pose><geometry><box><size>0.12 2.8 2.4</size></box></geometry></collision><visual name="partition_b_v"><pose>0 1.6 1.2 0 0 0</pose><geometry><box><size>0.12 2.8 2.4</size></box></geometry></visual>
+        <!-- East rooms divided by a wall and a 1.0 m doorway. -->
+        <collision name="east_partition_a"><pose>0.72 0.2 1.2 0 0 0</pose><geometry><box><size>1.44 0.12 2.4</size></box></geometry></collision><visual name="east_partition_a_v"><pose>0.72 0.2 1.2 0 0 0</pose><geometry><box><size>1.44 0.12 2.4</size></box></geometry></visual>
+        <collision name="east_partition_b"><pose>3.22 0.2 1.2 0 0 0</pose><geometry><box><size>1.56 0.12 2.4</size></box></geometry></collision><visual name="east_partition_b_v"><pose>3.22 0.2 1.2 0 0 0</pose><geometry><box><size>1.56 0.12 2.4</size></box></geometry></visual>
+      </link>
+    </model>
+    <!-- Bed clearance is 0.20 m to the underside; robot total height is about 0.14 m. -->
+    <model name="bed"><static>true</static><pose>2.65 1.75 0 0 0 0</pose><link name="bed_frame">
+      <collision name="mattress"><pose>0 0 0.34 0 0 0</pose><geometry><box><size>1.65 1.25 0.22</size></box></geometry></collision><visual name="mattress_v"><pose>0 0 0.34 0 0 0</pose><geometry><box><size>1.65 1.25 0.22</size></box></geometry></visual>
+      <collision name="leg1"><pose>-0.72 -0.52 0.10 0 0 0</pose><geometry><box><size>0.06 0.06 0.20</size></box></geometry></collision><visual name="leg1v"><pose>-0.72 -0.52 0.10 0 0 0</pose><geometry><box><size>0.06 0.06 0.20</size></box></geometry></visual>
+      <collision name="leg2"><pose>0.72 -0.52 0.10 0 0 0</pose><geometry><box><size>0.06 0.06 0.20</size></box></geometry></collision><visual name="leg2v"><pose>0.72 -0.52 0.10 0 0 0</pose><geometry><box><size>0.06 0.06 0.20</size></box></geometry></visual>
+      <collision name="leg3"><pose>-0.72 0.52 0.10 0 0 0</pose><geometry><box><size>0.06 0.06 0.20</size></box></geometry></collision><visual name="leg3v"><pose>-0.72 0.52 0.10 0 0 0</pose><geometry><box><size>0.06 0.06 0.20</size></box></geometry></visual>
+      <collision name="leg4"><pose>0.72 0.52 0.10 0 0 0</pose><geometry><box><size>0.06 0.06 0.20</size></box></geometry></collision><visual name="leg4v"><pose>0.72 0.52 0.10 0 0 0</pose><geometry><box><size>0.06 0.06 0.20</size></box></geometry></visual>
+    </link></model>
+    <model name="sofa"><static>true</static><pose>2.8 -1.75 0 0 0 0</pose><link name="sofa_link"><collision name="body"><pose>0 0 0.22 0 0 0</pose><geometry><box><size>1.45 0.62 0.44</size></box></geometry></collision><visual name="body_v"><pose>0 0 0.22 0 0 0</pose><geometry><box><size>1.45 0.62 0.44</size></box></geometry></visual></link></model>
+    <model name="table"><static>true</static><pose>-2.55 1.45 0 0 0 0</pose><link name="table_link"><collision name="top"><pose>0 0 0.43 0 0 0</pose><geometry><box><size>1.0 0.72 0.08</size></box></geometry></collision><visual name="top_v"><pose>0 0 0.43 0 0 0</pose><geometry><box><size>1.0 0.72 0.08</size></box></geometry></visual><collision name="leg1"><pose>-0.43 -0.29 0.20 0 0 0</pose><geometry><box><size>0.06 0.06 0.4</size></box></geometry></collision><collision name="leg2"><pose>0.43 -0.29 0.20 0 0 0</pose><geometry><box><size>0.06 0.06 0.4</size></box></geometry></collision><collision name="leg3"><pose>-0.43 0.29 0.20 0 0 0</pose><geometry><box><size>0.06 0.06 0.4</size></box></geometry></collision><collision name="leg4"><pose>0.43 0.29 0.20 0 0 0</pose><geometry><box><size>0.06 0.06 0.4</size></box></geometry></collision></link></model>
+    <model name="chair"><static>true</static><pose>-1.45 1.2 0 0 0 0</pose><link name="chair_link"><collision name="seat"><pose>0 0 0.24 0 0 0</pose><geometry><box><size>0.42 0.42 0.08</size></box></geometry></collision><visual name="seat_v"><pose>0 0 0.24 0 0 0</pose><geometry><box><size>0.42 0.42 0.08</size></box></geometry></visual><collision name="back"><pose>-0.18 0 0.48 0 0 0</pose><geometry><box><size>0.06 0.42 0.44</size></box></geometry></collision><visual name="back_v"><pose>-0.18 0 0.48 0 0 0</pose><geometry><box><size>0.06 0.42 0.44</size></box></geometry></visual><collision name="leg1"><pose>0.15 0.15 0.12 0 0 0</pose><geometry><box><size>0.04 0.04 0.24</size></box></geometry></collision><collision name="leg2"><pose>0.15 -0.15 0.12 0 0 0</pose><geometry><box><size>0.04 0.04 0.24</size></box></geometry></collision></link></model>
+    <!-- Rug is a normal 6 mm floor finish; the 12 mm stress step occupies only
+         the lower edge of the doorway, leaving a clear route into the house. -->
+    <model name="tapete"><static>true</static><pose>-2.7 -0.2 0 0 0 0</pose><link name="rug"><collision name="rug_collision"><pose>0 0 0.003 0 0 0</pose><geometry><box><size>1.7 1.15 0.006</size></box></geometry><surface><friction><ode><mu>0.55</mu><mu2>0.75</mu2></ode></friction></surface></collision><visual name="rug_visual"><pose>0 0 0.003 0 0 0</pose><geometry><box><size>1.7 1.15 0.006</size></box></geometry><material><ambient>0.38 0.22 0.16 1</ambient><diffuse>0.38 0.22 0.16 1</diffuse></material></visual></link></model>
+    <model name="soleira_12mm"><static>true</static><pose>-0.65 -1.15 0 0 0 0</pose><link name="threshold"><collision name="threshold_collision"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.30 0.30 0.012</size></box></geometry></collision><visual name="threshold_visual"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.30 0.30 0.012</size></box></geometry><material><ambient>0.50 0.42 0.30 1</ambient><diffuse>0.50 0.42 0.30 1</diffuse></material></visual></link></model>
+    <model name="obstaculo_pequeno"><static>true</static><pose>-3.25 0.55 0 0 0 0</pose><link name="obstacle"><collision name="collision"><pose>0 0 0.035 0 0 0</pose><geometry><box><size>0.10 0.10 0.07</size></box></geometry></collision><visual name="visual"><pose>0 0 0.035 0 0 0</pose><geometry><box><size>0.10 0.10 0.07</size></box></geometry></visual></link></model>
+    <model name="base_charging"><static>true</static><pose>-3.53 -2.15 0 0 0 0</pose><link name="dock"><collision name="base_collision"><pose>0 0 0.04 0 0 0</pose><geometry><box><size>0.36 0.50 0.08</size></box></geometry></collision><visual name="base_visual"><pose>0 0 0.04 0 0 0</pose><geometry><box><size>0.36 0.50 0.08</size></box></geometry><material><ambient>0.1 0.35 0.18 1</ambient><diffuse>0.1 0.35 0.18 1</diffuse></material></visual></link></model>
+    <!-- Leave enough clearance behind the robot to rotate in place beside the dock. -->
+    <include><uri>model://vacuum</uri><name>aspirador</name><pose>-2.90 -2.15 0 0 0 0</pose></include>
+  </world>
+</sdf>

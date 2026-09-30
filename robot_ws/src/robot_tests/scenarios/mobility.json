@@ -1,0 +1,10 @@
+[
+  {"name":"piso_normal","goal_map":[0.45,-0.15],"expect":"success"},
+  {"name":"tapete","goal_map":[0.45,1.95],"expect":"success"},
+  {"name":"soleira_12mm","goal_map":[2.50,1.70],"expect":"success"},
+  {"name":"porta_corredor","goal_map":[3.75,1.75],"expect":"success"},
+  {"name":"cadeira","goal_map":[2.35,3.35],"expect":"success"},
+  {"name":"canto","goal_map":[-0.35,4.45],"expect":"success"},
+  {"name":"obstaculo_frontal","goal_map":[0.35,3.20],"expect":"success"},
+  {"name":"tentativa_bloqueada_recovery","goal_map":[3.10,5.25],"expect":"failure"}
+]

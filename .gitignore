@@ -1,0 +1,9 @@
+robot_ws/build/
+robot_ws/install/
+robot_ws/log/
+robot_ws/src/robot_navigation/maps/*.pgm
+robot_ws/src/robot_navigation/maps/*.yaml
+results/**
+!results/.gitkeep
+*.py[cod]
+__pycache__/

@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="aspirador">
+  <!-- TF-only description; dynamics and sensors are authored once in models/vacuum/model.sdf. -->
+  <link name="base_link"/><link name="left_track"/><link name="right_track"/><link name="lidar_link"/><link name="imu_link"/>
+  <joint name="left_track_mount" type="fixed"><parent link="base_link"/><child link="left_track"/><origin xyz="0 0.145 0" rpy="0 0 0"/></joint>
+  <joint name="right_track_mount" type="fixed"><parent link="base_link"/><child link="right_track"/><origin xyz="0 -0.145 0" rpy="0 0 0"/></joint>
+  <joint name="lidar_mount" type="fixed"><parent link="base_link"/><child link="lidar_link"/><origin xyz="0 0 0.133" rpy="0 0 0"/></joint>
+  <joint name="imu_mount" type="fixed"><parent link="base_link"/><child link="imu_link"/><origin xyz="0 0 0.09" rpy="0 0 0"/></joint>
+</robot>
