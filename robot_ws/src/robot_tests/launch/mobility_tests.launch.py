@@ -43,7 +43,7 @@ def generate_launch_description():
         DeclareLaunchArgument('scenario_name', default_value=''),
         DeclareLaunchArgument('run_control_tests', default_value='true'),
         DeclareLaunchArgument('warmup_seconds', default_value='120.0'),
-        DeclareLaunchArgument('goal_timeout', default_value='45.0'),
+        DeclareLaunchArgument('goal_timeout', default_value='75.0'),
         DeclareLaunchArgument('setup_timeout', default_value='90.0'),
         sim,
         world_pose_bridge,

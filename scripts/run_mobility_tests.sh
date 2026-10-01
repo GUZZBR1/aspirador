@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -eo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+auto_ros_domain=false
+if [[ -z "${ROS_DOMAIN_ID:-}" ]]; then
+  ros_domain_base=$((20 + $$ % 200))
+  auto_ros_domain=true
+fi
+gz_partition_prefix="${GZ_PARTITION:-aspirador-mobility-$$}"
+launch_index=0
 source /opt/ros/jazzy/setup.bash
 [[ -f "$ROOT/robot_ws/install/setup.bash" ]] || { echo 'Execute colcon build em robot_ws antes.' >&2; exit 2; }
 source "$ROOT/robot_ws/install/setup.bash"
@@ -11,8 +18,7 @@ rm -f "$ROOT/results/mobility_report.json"
 scenario_name=''
 scenario_limit=8
 run_control_tests=true
-warmup_seconds=120.0
-warmup_explicit=false
+warmup_seconds=40.0
 headless_override=''
 extra_args=()
 for arg in "$@"; do
@@ -20,7 +26,7 @@ for arg in "$@"; do
     scenario_name:=*) scenario_name="${arg#scenario_name:=}" ;;
     scenario_limit:=*) scenario_limit="${arg#scenario_limit:=}" ;;
     run_control_tests:=*) run_control_tests="${arg#run_control_tests:=}" ;;
-    warmup_seconds:=*) warmup_seconds="${arg#warmup_seconds:=}"; warmup_explicit=true ;;
+    warmup_seconds:=*) warmup_seconds="${arg#warmup_seconds:=}" ;;
     headless:=*) headless_override="${arg#headless:=}" ;;
     *) extra_args+=("$arg") ;;
   esac
@@ -38,14 +44,17 @@ cleanup_new_gazebo() {
   done < <(gazebo_pids)
 }
 trap cleanup_new_gazebo EXIT
-headless_arg='headless:=false'
+headless_arg='headless:=true'
 if [[ -n "$headless_override" ]]; then
   headless_arg="headless:=$headless_override"
-elif [[ -z "$scenario_name" || ( -z "${WAYLAND_DISPLAY:-}" && -z "${DISPLAY:-}" ) ]]; then
-  headless_arg='headless:=true'
 fi
 run_launch() {
   local status=0
+  if [[ "$auto_ros_domain" == true ]]; then
+    export ROS_DOMAIN_ID="$((20 + (ros_domain_base - 20 + launch_index) % 200))"
+  fi
+  export GZ_PARTITION="${gz_partition_prefix}-${launch_index}"
+  launch_index=$((launch_index + 1))
   ros2 launch robot_tests mobility_tests.launch.py output_dir:="$ROOT/results" "$headless_arg" "$@" || status=$?
   cleanup_new_gazebo
   return "$status"
@@ -73,9 +82,9 @@ PY
 )
 
   if [[ "$run_control_tests" == true ]]; then
-    # Run probes at the known spawn pose, before autonomy can move the robot.
-    control_warmup=$warmup_seconds
-    if [[ "$warmup_explicit" == false ]]; then control_warmup=20.0; fi
+    # Control probes do not need SLAM warmup; keep the robot near its spawn pose.
+    # Mobility scenarios use their own longer warmup below.
+    control_warmup=0.0
     # scenario_limit=0 runs the three control probes without a mobility case.
     run_launch scenario_limit:=0 run_control_tests:=true "warmup_seconds:=$control_warmup" \
       "${extra_args[@]}" || true
@@ -85,12 +94,14 @@ PY
   fi
 
   for name in "${scenario_names[@]}"; do
+    scenario_warmup=$warmup_seconds
+    if [[ "$name" == soleira_12mm ]]; then scenario_warmup=80.0; fi
     run_launch "scenario_name:=$name" run_control_tests:=false \
-      "warmup_seconds:=$warmup_seconds" "${extra_args[@]}" || true
+      "warmup_seconds:=$scenario_warmup" "${extra_args[@]}" || true
     if [[ -f "$ROOT/results/mobility_report.json" ]]; then
       cp "$ROOT/results/mobility_report.json" "$case_dir/$name.json"
     else
-      echo "Não foi gerado relatório para o cenário $name." >&2
+      echo "Relatorio nao gerado em results/mobility_report.json." >&2
     fi
   done
 

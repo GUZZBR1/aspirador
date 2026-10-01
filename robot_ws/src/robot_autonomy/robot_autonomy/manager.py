@@ -1,7 +1,10 @@
 import json
 import math
+import os
+from xml.etree import ElementTree
 
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
@@ -15,6 +18,59 @@ from tf2_ros import Buffer, TransformListener
 
 
 STATES = ('IDLE', 'EXPLORING', 'COVERING', 'RETURNING_TO_DOCK', 'DOCKING', 'CHARGING', 'RECOVERY', 'ERROR')
+ROOM_BOUNDS = {
+    'west': (-3.85, -0.18, -2.85, 2.85),
+    'east_north': (0.18, 3.85, 0.42, 2.85),
+    'east_south': (0.18, 3.85, -2.85, -0.42),
+}
+
+
+def _grid_cells_within_radius(center_x, center_y, width, height, resolution, radius):
+    cells = set()
+    cell_radius = int(math.ceil(radius / resolution))
+    for dy in range(-cell_radius, cell_radius + 1):
+        for dx in range(-cell_radius, cell_radius + 1):
+            if (dx * resolution) ** 2 + (dy * resolution) ** 2 > radius ** 2:
+                continue
+            x, y = center_x + dx, center_y + dy
+            if 0 <= x < width and 0 <= y < height:
+                cells.add(y * width + x)
+    return cells
+
+
+def _connected_free_cells(data, width, height, seeds):
+    connected = {index for index in seeds
+                 if 0 <= index < len(data) and 0 <= data[index] < 25}
+    queue = list(connected)
+    for index in queue:
+        x, y = index % width, index // width
+        neighbors = []
+        if x > 0:
+            neighbors.append(index - 1)
+        if x + 1 < width:
+            neighbors.append(index + 1)
+        if y > 0:
+            neighbors.append(index - width)
+        if y + 1 < height:
+            neighbors.append(index + width)
+        for neighbor in neighbors:
+            if neighbor not in connected and 0 <= data[neighbor] < 25:
+                connected.add(neighbor)
+                queue.append(neighbor)
+    return connected
+
+
+def _pose_made_progress(reference, current, distance_threshold,
+                       rotation_threshold, rotation_counts):
+    if math.hypot(current[0] - reference[0], current[1] - reference[1]) > distance_threshold:
+        return True
+    rotation = abs(math.atan2(math.sin(current[2] - reference[2]),
+                              math.cos(current[2] - reference[2])))
+    return rotation_counts and rotation > rotation_threshold
+
+
+def _goal_needs_progress_tracking(goal_active, state, progressed):
+    return goal_active and state in ('EXPLORING', 'COVERING') and not progressed
 
 
 class AutonomyManager(Node):
@@ -24,16 +80,26 @@ class AutonomyManager(Node):
             'battery_capacity_percent': 100.0, 'low_battery_percent': 20.0,
             'resume_battery_percent': 95.0, 'drain_time_percent_per_second': 0.035,
             'drain_distance_percent_per_meter': 0.025, 'drain_motor_percent_per_second': 0.018,
-            'charge_percent_per_second': 0.45, 'dock_radius': 0.40,
+            # The pad's half-diagonal (0.308 m) plus Nav2's 0.24 m robot
+            # radius puts the reachable contact envelope at about 0.55 m.
+            'charge_percent_per_second': 0.45, 'dock_radius': 0.55,
             'dock_speed_threshold': 0.06, 'dock_angular_speed_threshold': 0.08,
-            'stuck_speed_threshold': 0.07, 'stuck_timeout': 12.0,
+            'stuck_timeout': 12.0,
             'stuck_progress_distance': 0.20, 'coverage_complete_percent': 98.0,
             'coverage_brush_radius': 0.19, 'frontier_min_distance': 0.35, 'dock_keepout_radius': 0.75,
             'frontier_clearance': 0.55,
+            'stuck_goal_blacklist_radius': 0.40,
             'navigation_frame': 'map', 'robot_frame': 'base_link', 'odom_frame': 'odom'}
         for name, value in defaults.items():
             self.declare_parameter(name, value)
         self.p = {k: self.get_parameter(k).value for k in defaults}
+        description_share = get_package_share_directory('robot_description')
+        world_root = ElementTree.parse(os.path.join(
+            description_share, 'worlds', 'casa.sdf')).getroot()
+        robot_include = next(include for include in world_root.iter('include')
+                             if include.findtext('name') == 'aspirador')
+        self.world_spawn_pose = tuple(float(value) for value in
+                                      robot_include.findtext('pose').split())
         self.action = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -182,6 +248,32 @@ class AutonomyManager(Node):
             return gx, gy
         return None
 
+    def _reachable_free_cells(self, grid, robot_pose):
+        robot_cell = self._grid_index(robot_pose[0], robot_pose[1], grid)
+        if robot_cell is None:
+            return set()
+        width, height = grid.info.width, grid.info.height
+        seeds = [robot_cell[1] * width + robot_cell[0]]
+        if grid.data[seeds[0]] < 0 or grid.data[seeds[0]] >= 25:
+            # The robot center may fall on an unobserved or occupied cell. Snap
+            # to the nearest small-radius known-free cell before flood filling.
+            radius = int(math.ceil(0.20 / grid.info.resolution))
+            gx, gy = robot_cell
+            candidates = []
+            for dy in range(-radius, radius + 1):
+                for dx in range(-radius, radius + 1):
+                    if (dx * grid.info.resolution) ** 2 + (dy * grid.info.resolution) ** 2 > 0.20 ** 2:
+                        continue
+                    nx, ny = gx + dx, gy + dy
+                    if 0 <= nx < width and 0 <= ny < height:
+                        index = ny * width + nx
+                        if 0 <= grid.data[index] < 25:
+                            candidates.append(((dx * dx + dy * dy), index))
+            if not candidates:
+                return set()
+            seeds = [min(candidates)[1]]
+        return _connected_free_cells(grid.data, width, height, seeds)
+
     def _has_frontier_clearance(self, grid, gx, gy):
         """Reject goal cells too close to mapped obstacles for this footprint."""
         radius = int(math.ceil(self.p['frontier_clearance'] / grid.info.resolution))
@@ -248,6 +340,44 @@ class AutonomyManager(Node):
         except Exception:
             return None
 
+    def _map_to_sdf_world(self, x, y):
+        if self.dock_map_pose is None:
+            return x, y
+        world_x, world_y, world_yaw = (self.world_spawn_pose[0],
+                                       self.world_spawn_pose[1],
+                                       self.world_spawn_pose[5])
+        map_x, map_y, map_yaw = self.dock_map_pose
+        delta = map_yaw - world_yaw
+        dx, dy = x - map_x, y - map_y
+        return (world_x + math.cos(delta) * dx + math.sin(delta) * dy,
+                world_y - math.sin(delta) * dx + math.cos(delta) * dy)
+
+    def _coverage_visited_rooms(self):
+        if (self.map is None or self.coverage is None or
+                self._grid_geometry(self.map) != self._grid_geometry(self.coverage) or
+                self.dock_map_pose is None):
+            return set()
+        width = self.map.info.width
+        resolution = self.map.info.resolution
+        origin = self.map.info.origin.position
+        origin_yaw = self._yaw(self.map.info.origin.orientation)
+        visited_rooms = set()
+        for index, map_value in enumerate(self.map.data):
+            if map_value < 0 or map_value >= 25 or self.coverage.data[index] != 100:
+                continue
+            gx, gy = index % width, index // width
+            lx, ly = (gx + 0.5) * resolution, (gy + 0.5) * resolution
+            map_x = origin.x + math.cos(origin_yaw) * lx - math.sin(origin_yaw) * ly
+            map_y = origin.y + math.sin(origin_yaw) * lx + math.cos(origin_yaw) * ly
+            world_x, world_y = self._map_to_sdf_world(map_x, map_y)
+            room = next((name for name, (xmin, xmax, ymin, ymax) in ROOM_BOUNDS.items()
+                         if xmin < world_x < xmax and ymin < world_y < ymax), None)
+            if room:
+                visited_rooms.add(room)
+                if len(visited_rooms) == len(ROOM_BOUNDS):
+                    break
+        return visited_rooms
+
     def _battery_tick(self, dt):
         speed = math.hypot(self.cmd.linear.x, self.cmd.linear.y) + abs(self.cmd.angular.z) * 0.25
         if self.state == 'CHARGING':
@@ -290,6 +420,20 @@ class AutonomyManager(Node):
             self.get_logger().info('Pose da base capturada em odom: %.2f, %.2f' %
                                    (self.dock_odom_pose[0], self.dock_odom_pose[1]))
         self._record_path_pose(pose)
+        if (self.state == 'COVERING' and not self.goal_in_progress and
+                self._coverage_visited_rooms() == set(ROOM_BOUNDS)):
+            diagnostics = self._exploration_diagnostics(pose)
+            diagnostics['reason'] = 'all_named_rooms_visited_before_full_grid_coverage'
+            self._publish_event('coverage_reachability:' + json.dumps(
+                diagnostics, separators=(',', ':')))
+            if diagnostics['coverage']['percent'] >= self.p['coverage_complete_percent']:
+                self._set_state('IDLE')
+                self._publish_event('coverage_complete')
+            else:
+                self._set_state('IDLE')
+                self._publish_event('coverage_incomplete:' + json.dumps(
+                    diagnostics, separators=(',', ':')))
+            return
         if self.state not in ('RETURNING_TO_DOCK', 'DOCKING', 'CHARGING', 'ERROR') and self.battery <= self.p['low_battery_percent']:
             self.resume_state = self.state if self.state in ('EXPLORING', 'COVERING') else 'EXPLORING'
             self.return_started = now
@@ -320,6 +464,11 @@ class AutonomyManager(Node):
                     self.docking_started = now
                     self._set_state('DOCKING')
                     self._publish_event('dock_alignment_started')
+                    # The map sees the charging pad as an obstacle, so Nav2
+                    # can keep pursuing its center after the robot is already
+                    # within the modeled pad/footprint envelope. Stop that
+                    # goal and validate a stationary docking dwell instead.
+                    self._cancel_current()
                     return
                 if self.docking_started is None:
                     self.docking_started = now
@@ -380,7 +529,7 @@ class AutonomyManager(Node):
         if self.goal_failed:
             self.goal_failed = False
             if self.goal_cell is not None:
-                self.blacklist.add(self.goal_cell)
+                self._blacklist_goal_region('navigation_failed')
         goal = None
         if self.state == 'EXPLORING':
             if self.map is None or not self.map.data:
@@ -395,13 +544,16 @@ class AutonomyManager(Node):
                 if (self.map is None or self.coverage is None or
                         self._grid_geometry(self.map) != self._grid_geometry(self.coverage)):
                     return
-                if self.coverage_percent >= self.p['coverage_complete_percent']:
+                diagnostics = self._exploration_diagnostics(pose)
+                self._publish_event('coverage_reachability:' + json.dumps(
+                    diagnostics, separators=(',', ':')))
+                if diagnostics['coverage']['percent'] >= self.p['coverage_complete_percent']:
                     self._set_state('IDLE')
                     self._publish_event('coverage_complete')
                 else:
                     self._set_state('IDLE')
                     self._publish_event('coverage_incomplete:' + json.dumps(
-                        self._exploration_diagnostics(pose), separators=(',', ':')))
+                        diagnostics, separators=(',', ':')))
                 return
         if goal:
             cell, x, y = goal
@@ -411,20 +563,32 @@ class AutonomyManager(Node):
     def _check_stuck(self, pose, dt):
         if self.odom is None:
             return
-        moving_command = math.hypot(self.cmd.linear.x, self.cmd.linear.y) + abs(self.cmd.angular.z)*0.2
         current = (pose[0], pose[1], pose[2]) if pose else None
         progressed = False
         if current and self.motion_reference_pose:
-            # Compare against the position at the start of the no-progress
-            # window. Comparing consecutive samples lets small SLAM jitter
-            # reset the timer forever while the chassis is physically stuck.
-            progressed = (math.hypot(current[0]-self.motion_reference_pose[0],
-                                     current[1]-self.motion_reference_pose[1]) > self.p['stuck_progress_distance'] or
-                          abs(math.atan2(math.sin(current[2]-self.motion_reference_pose[2]),
-                                         math.cos(current[2]-self.motion_reference_pose[2]))) > 0.15)
+            rotation_counts = False
+            if self.goal_cell is not None and self.map is not None:
+                width = self.map.info.width
+                gx, gy = self.goal_cell % width, self.goal_cell // width
+                origin = self.map.info.origin.position
+                origin_yaw = self._yaw(self.map.info.origin.orientation)
+                resolution = self.map.info.resolution
+                lx, ly = (gx + 0.5) * resolution, (gy + 0.5) * resolution
+                goal_x = origin.x + math.cos(origin_yaw) * lx - math.sin(origin_yaw) * ly
+                goal_y = origin.y + math.sin(origin_yaw) * lx + math.cos(origin_yaw) * ly
+                rotation_counts = math.hypot(current[0] - goal_x,
+                                             current[1] - goal_y) <= 0.30
+            # Rotation is progress only beside the goal; otherwise spinning in
+            # place would reset the stuck timer indefinitely.
+            progressed = _pose_made_progress(
+                self.motion_reference_pose, current,
+                self.p['stuck_progress_distance'], 0.15, rotation_counts)
         if current:
             self.last_motion_pose = current
-        if moving_command > self.p['stuck_speed_threshold'] and not progressed:
+        # Nav2 may emit commands below the configured speed threshold while it
+        # repeatedly rotates or waits against an unreachable path. An active
+        # goal with no translational progress still needs a bounded retry.
+        if _goal_needs_progress_tracking(self.goal_in_progress, self.state, progressed):
             if self.motion_reference_pose is None:
                 self.motion_reference_pose = current
             self.no_progress_seconds += dt
@@ -441,8 +605,22 @@ class AutonomyManager(Node):
             self.no_progress_seconds = 0.0
             self.motion_reference_pose = current
             if self.goal_cell is not None:
-                self.blacklist.add(self.goal_cell)
+                self._blacklist_goal_region('stuck')
             self._cancel_current()
+
+    def _blacklist_goal_region(self, reason):
+        if self.goal_cell is None or self.map is None:
+            return
+        width, height = self.map.info.width, self.map.info.height
+        center_x, center_y = self.goal_cell % width, self.goal_cell // width
+        radius = float(self.p['stuck_goal_blacklist_radius'])
+        blacklisted = _grid_cells_within_radius(
+            center_x, center_y, width, height, self.map.info.resolution, radius)
+        self.blacklist.update(blacklisted)
+        self._publish_event('frontier_goal_' + reason + ':' + json.dumps({
+            'goal_cell': self.goal_cell, 'blacklisted_cells': len(blacklisted),
+            'radius_m': radius, 'frame_id': self.map.header.frame_id},
+            separators=(',', ':')))
 
     def _publish_event(self, data):
         self.event_pub.publish(String(data=data))
@@ -573,12 +751,16 @@ class AutonomyManager(Node):
         res = grid.info.resolution
         ox, oy = grid.info.origin.position.x, grid.info.origin.position.y
         yaw0 = self._yaw(grid.info.origin.orientation)
+        reachable = self._reachable_free_cells(grid, robot_pose)
+        if not reachable:
+            return None
         candidates = []
         for gy in range(1, height-1):
             row = gy*width
             for gx in range(1, width-1):
                 index = row+gx
-                if grid.data[index] < 0 or grid.data[index] >= 25 or index in self.blacklist:
+                if (grid.data[index] < 0 or grid.data[index] >= 25 or
+                        index not in reachable or index in self.blacklist):
                     continue
                 unknown = any(grid.data[(gy+dy)*width+gx+dx] < 0 for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)))
                 if not unknown:
@@ -606,11 +788,14 @@ class AutonomyManager(Node):
         res = grid.info.resolution
         ox, oy = grid.info.origin.position.x, grid.info.origin.position.y
         yaw0 = self._yaw(grid.info.origin.orientation)
+        reachable = self._reachable_free_cells(self.map, robot_pose)
+        if not reachable:
+            return None
         candidates = []
         for gy in range(1, height-1):
             for gx in range(1, width-1):
                 idx=gy*width+gx
-                if grid.data[idx] != 0 or idx in self.blacklist:
+                if grid.data[idx] != 0 or idx not in reachable or idx in self.blacklist:
                     continue
                 lx, ly = (gx+0.5)*res, (gy+0.5)*res
                 x=ox+math.cos(yaw0)*lx-math.sin(yaw0)*ly
@@ -635,6 +820,7 @@ class AutonomyManager(Node):
         known_free_count = sum(free)
         visited_count = sum(visited)
         robot_cell = self._grid_index(robot_pose[0], robot_pose[1], grid)
+        reachable_cells = self._reachable_free_cells(grid, robot_pose)
 
         def neighbors(index):
             x, y = index % width, index // width
@@ -648,22 +834,34 @@ class AutonomyManager(Node):
                 yield index + width
 
         components = []
+        component_by_cell = {}
         unseen = {i for i, is_free in enumerate(free) if is_free}
         while unseen:
-            seed = unseen.pop()
+            seed = min(unseen)
+            unseen.remove(seed)
             cells = [seed]
             for index in cells:
                 for neighbor in neighbors(index):
                     if neighbor in unseen:
                         unseen.remove(neighbor)
                         cells.append(neighbor)
-            is_reachable = (robot_cell is not None and
-                            robot_cell[1] * width + robot_cell[0] in cells)
+            is_reachable = any(index in reachable_cells for index in cells)
             components.append({
                 'free_cells': len(cells),
                 'visited_cells': sum(visited[index] for index in cells),
                 'reachable_from_robot': is_reachable,
-                'representative_cell': [seed % width, seed // width]})
+                'representative_cell': [seed % width, seed // width],
+                '_cells': cells})
+        components.sort(key=lambda component: component['free_cells'], reverse=True)
+        for component_id, component in enumerate(components, start=1):
+            component['component_id'] = component_id
+            component['unvisited_cells'] = (component['free_cells'] -
+                                            component['visited_cells'])
+            component['unreachable_reason'] = (
+                None if component['reachable_from_robot'] else
+                'no_4_connected_known_free_path_from_robot_cell')
+            for index in component.pop('_cells'):
+                component_by_cell[index] = component
 
         frontier = {'cells': 0, 'far_enough': 0, 'outside_dock_keepout': 0,
                     'safe_clearance': 0, 'safe_unblacklisted': 0,
@@ -708,6 +906,48 @@ class AutonomyManager(Node):
                             if index not in self.blacklist:
                                 unvisited['safe_unblacklisted'] += 1
 
+        # These three room interiors follow the SDF partitions in casa.sdf.
+        # Doorways and shared walls are excluded so a doorway crossing alone
+        # cannot count as visiting a room.
+        rooms = {name: {'free_cells': 0, 'visited_cells': 0,
+                        'reachable_free_cells': 0, 'unreachable_component_ids': set()}
+                 for name in ROOM_BOUNDS}
+        for index, is_free in enumerate(free):
+            if not is_free:
+                continue
+            x, y = index % width, index // width
+            lx, ly = (x + 0.5) * resolution, (y + 0.5) * resolution
+            world_x = origin.x + math.cos(yaw) * lx - math.sin(yaw) * ly
+            world_y = origin.y + math.sin(yaw) * lx + math.cos(yaw) * ly
+            world_x, world_y = self._map_to_sdf_world(world_x, world_y)
+            room_name = next((name for name, (xmin, xmax, ymin, ymax) in ROOM_BOUNDS.items()
+                              if xmin < world_x < xmax and ymin < world_y < ymax), None)
+            if room_name is None:
+                continue
+            room = rooms[room_name]
+            room['free_cells'] += 1
+            room['visited_cells'] += int(visited[index])
+            component = component_by_cell.get(index)
+            if component and component['reachable_from_robot']:
+                room['reachable_free_cells'] += 1
+            elif component:
+                room['unreachable_component_ids'].add(component['component_id'])
+
+        for name, room in rooms.items():
+            component_ids = sorted(room.pop('unreachable_component_ids'))
+            if room['visited_cells']:
+                reason = None
+            elif room['free_cells'] == 0:
+                reason = 'room_not_mapped_when_frontiers_exhausted'
+            elif room['reachable_free_cells'] == 0:
+                reason = 'known_free_room_cells_disconnected_from_robot'
+            else:
+                reason = 'reachable_known_free_cells_unvisited_when_frontiers_exhausted'
+            room['coverage_percent'] = (100.0 * room['visited_cells'] /
+                                        max(1, room['free_cells']))
+            room['unreachable_component_ids'] = component_ids
+            room['reason'] = reason
+
         return {
             'reason': 'no_safe_unvisited_goal',
             'grid': {'width': width, 'height': height, 'resolution_m': resolution,
@@ -717,8 +957,15 @@ class AutonomyManager(Node):
             'robot_cell': list(robot_cell) if robot_cell is not None else None,
             'frontiers': frontier,
             'unvisited_free': unvisited,
-            'known_free_components': sorted(components,
-                key=lambda component: component['free_cells'], reverse=True)[:20],
+            'known_free_components': components[:20],
+            'unreachable_components': [
+                {'component_id': component['component_id'],
+                 'free_cells': component['free_cells'],
+                 'visited_cells': component['visited_cells'],
+                 'representative_cell': component['representative_cell'],
+                 'reason': component['unreachable_reason']}
+                for component in components if not component['reachable_from_robot']],
+            'rooms': rooms,
             'omitted_small_components': max(0, len(components) - 20)}
 
 

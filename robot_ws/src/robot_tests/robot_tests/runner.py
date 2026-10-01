@@ -21,6 +21,14 @@ from tf2_msgs.msg import TFMessage
 from tf2_ros import Buffer, TransformListener
 
 
+def _matches_expected(expect, outcome):
+    if expect == 'success':
+        return outcome == 'goal_reached'
+    if expect == 'failure':
+        return outcome in ('invalid_goal', 'nav2_failure')
+    return outcome == expect
+
+
 class MobilityRunner(Node):
     def __init__(self):
         super().__init__('mobility_runner')
@@ -80,6 +88,7 @@ class MobilityRunner(Node):
         self.stage = 'setup'
         self.setup_targets = []
         self.setup_target_index = 0
+        self.setup_retry_limit = 2
         self.case_record = None
         self.pending_outcome = None
         self.cancel_future = None
@@ -645,10 +654,15 @@ class MobilityRunner(Node):
             yaw_error = None if pose is None else self._yaw_error(pose['yaw'], target_yaw)
             setup_ok = (outcome['outcome'] == 'goal_reached' and distance is not None and
                         distance <= 0.25 and yaw_error is not None and abs(yaw_error) <= 0.35)
+            prior_misses = sum(
+                step.get('target_map') == target and step.get('outcome') == 'goal_reached'
+                and not step.get('accepted_by_pose_tolerance', False)
+                for step in self.case_record['setup_steps'])
             step = {'target_map': target, **outcome, 'end': end,
                     'distance_to_target_m': distance,
                     'target_yaw_rad': target_yaw,
                     'yaw_error_to_target_rad': yaw_error,
+                    'attempt': prior_misses + 1,
                     'accepted_by_pose_tolerance': setup_ok}
             self.case_record['setup_steps'].append(step)
             if setup_ok:
@@ -660,8 +674,19 @@ class MobilityRunner(Node):
                                              'distance_to_start_m': distance}
                 self._begin_trial(case)
                 return
+            if (outcome['outcome'] == 'goal_reached' and
+                    prior_misses < self.setup_retry_limit):
+                self.get_logger().warning(
+                    '%s setup pose outside tolerance (%.3f m, yaw %.3f rad); retry %d/%d' %
+                    (case['name'], distance if distance is not None else float('inf'),
+                     yaw_error if yaw_error is not None else float('inf'),
+                     prior_misses + 1, self.setup_retry_limit))
+                return
             self.case_record['setup'] = {**outcome, 'end': end,
-                                         'distance_to_target_m': distance}
+                                         'distance_to_target_m': distance,
+                                         'yaw_error_to_target_rad': yaw_error,
+                                         'attempts': prior_misses + 1,
+                                         'retry_limit': self.setup_retry_limit}
             self.case_record.update({'passed': False, 'outcome': 'setup_failed',
                                      'observed': outcome['outcome'], 'end': end})
         else:
@@ -673,9 +698,7 @@ class MobilityRunner(Node):
                 crossing = self._threshold_crossing(case)
                 if not crossing['observed']:
                     classified = 'route_not_proven'
-            expected_success = case['expect'] == 'success'
-            passed = (classified == 'goal_reached' if expected_success else
-                      classified in ('invalid_goal', 'nav2_failure'))
+            passed = _matches_expected(case['expect'], classified)
             self.case_record.update({'passed': passed, 'outcome': classified,
                                      'observed': outcome['outcome'], 'end': end,
                                      'elapsed_wall_seconds': outcome['elapsed_wall_seconds'],

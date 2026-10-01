@@ -9,7 +9,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import BatteryState
+from sensor_msgs.msg import BatteryState, LaserScan
 from std_msgs.msg import Float32, String
 from tf2_ros import Buffer, TransformListener
 
@@ -37,15 +37,17 @@ class MetricsRecorder(Node):
         self.pending_coverage = None
         self.grid_pair = None
         self.coverage_counts = None
+        self.saved_coverage_counts = None
         self.samples_written = 0
         self.validation_errors = []
         self.event_log = []
         self.events_observed = False
+        self.scan_seen = False
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.events = {'collision_proxy_lidar': 0, 'contact_confirmed': None,
                        'stuck_events': 0, 'recovery_state_transitions': 0,
-                       'recovery_attempts_local': 0,
+                       'recovery_attempts_local': 0, 'navigation_goal_failures': 0,
                        'recovery_attempts_nav2': None,
                        'stuck_locations': [], 'return_seconds': [], 'failures': []}
         self.create_subscription(Odometry, '/odometry/filtered', self._odom, 20)
@@ -56,6 +58,7 @@ class MetricsRecorder(Node):
         self.create_subscription(String, '/robot/state', lambda m: setattr(self, 'state', m.data), latched)
         self.create_subscription(String, '/robot/event', self._event, 20)
         self.create_subscription(Twist, '/cmd_vel', lambda m: setattr(self, 'cmd', m), 10)
+        self.create_subscription(LaserScan, '/scan', self._scan, 10)
         self.create_subscription(OccupancyGrid, '/map', self._map, latched)
         self.create_subscription(OccupancyGrid, '/coverage/grid', self._coverage_grid, latched)
         self.create_timer(1.0, self._write_sample)
@@ -70,6 +73,9 @@ class MetricsRecorder(Node):
         elif self.distance is None:
             self.distance = 0.0
         self.last_xy = xy
+
+    def _scan(self, _msg):
+        self.scan_seen = True
 
     def _map(self, msg):
         key = self._grid_key(msg)
@@ -135,6 +141,8 @@ class MetricsRecorder(Node):
             self.events['recovery_state_transitions'] += 1
         elif event.startswith('recovery_attempt:'):
             self.events['recovery_attempts_local'] += 1
+        elif event == 'navigation_goal_failed':
+            self.events['navigation_goal_failures'] += 1
         elif event == 'stuck_detected':
             self.events['stuck_events'] += 1
             self.events['stuck_locations'].append(location or {
@@ -150,7 +158,7 @@ class MetricsRecorder(Node):
         elif event == 'state:ERROR':
             self.events['failures'].append(event)
         elif event.startswith(('coverage_incomplete:', 'dock_navigation_failed',
-                               'dock_pose_unavailable', 'navigation_goal_failed')):
+                               'dock_pose_unavailable')):
             if (event.startswith(('dock_navigation_failed', 'dock_pose_unavailable')) and
                     self.events['failures'] and self.events['failures'][-1] == 'state:ERROR'):
                 self.events['failures'][-1] = event
@@ -218,8 +226,12 @@ class MetricsRecorder(Node):
                 errors.append('invalid_events')
             else:
                 for key in ('collision_proxy_lidar', 'stuck_events',
-                            'recovery_state_transitions', 'recovery_attempts_local'):
-                    if type(events.get(key)) is not int or events[key] < 0:
+                            'recovery_state_transitions', 'recovery_attempts_local',
+                            'navigation_goal_failures'):
+                    value = events.get(key)
+                    if key == 'collision_proxy_lidar' and value is None:
+                        continue
+                    if type(value) is not int or value < 0:
                         errors.append('invalid_events_' + key)
                 locations = events.get('stuck_locations')
                 if not isinstance(locations, list) or not all(
@@ -257,7 +269,10 @@ class MetricsRecorder(Node):
                    'linear_x': self._finite(self.cmd.linear.x),
                    'linear_y': self._finite(self.cmd.linear.y),
                    'angular_z': self._finite(self.cmd.angular.z)},
-               'events': dict(self.events) if self.events_observed else None}
+               'events': ({**self.events,
+                           'collision_proxy_lidar': (self.events['collision_proxy_lidar']
+                                                     if self.scan_seen else None)}
+                          if self.events_observed else None)}
         if self.odom:
             pose, frame, _source = self._position_pose()
             twist = self.odom.twist.twist
@@ -280,27 +295,59 @@ class MetricsRecorder(Node):
             self._write_artifacts()
 
     def _write_artifacts(self):
+        if getattr(self, 'file', None) is not None:
+            self.file.flush()
+        lines_read, offline_errors = MetricsRecorder._validate_saved_jsonl(
+            self.path, self.samples_written)
+        previous_snapshot_errors = []
         if self.grid_pair is not None:
-            mapped, coverage = self.grid_pair
-            payload = {'schema_version': 1, 'grid': self._grid_info(mapped),
-                       'free_threshold': 25, 'map_data': list(mapped.data),
-                       'coverage_data': list(coverage.data), 'counts': self.coverage_counts}
-            self._write_json(self.coverage_path, payload)
+            if os.path.exists(self.coverage_path):
+                if self.saved_coverage_counts is None:
+                    previous_snapshot_errors = ['coverage_snapshot_unexpected_existing_file']
+                else:
+                    previous_snapshot_errors = MetricsRecorder._validate_saved_coverage(
+                        self.coverage_path, self.saved_coverage_counts)
+            offline_errors.extend(previous_snapshot_errors)
+            if not offline_errors:
+                mapped, coverage = self.grid_pair
+                payload = {'schema_version': 1, 'grid': self._grid_info(mapped),
+                           'free_threshold': 25, 'map_data': list(mapped.data),
+                           'coverage_data': list(coverage.data), 'counts': self.coverage_counts}
+                self._write_json(self.coverage_path, payload)
+                self.saved_coverage_counts = dict(self.coverage_counts)
+                offline_errors.extend(MetricsRecorder._validate_saved_coverage(
+                    self.coverage_path, self.coverage_counts))
+        snapshot_available = (self.grid_pair is not None and
+                              self.saved_coverage_counts is not None and
+                              not previous_snapshot_errors)
         observed = self.events_observed
         failure_counts = Counter(event.split(':', 1)[0] for event in self.events['failures'])
+        reported_events = ({**self.events,
+                            'collision_proxy_lidar': (self.events['collision_proxy_lidar']
+                                                      if self.scan_seen else None)}
+                           if observed else None)
+        all_errors = sorted(set(self.validation_errors + offline_errors))
         summary = {'schema_version': 2, 'jsonl': os.path.basename(self.path),
-                   'coverage_snapshot': os.path.basename(self.coverage_path) if self.grid_pair else None,
+                   'coverage_snapshot': os.path.basename(self.coverage_path) if snapshot_available else None,
                    'samples_written': self.samples_written,
-                   'schema_valid': not self.validation_errors,
-                   'validation_errors': sorted(set(self.validation_errors)),
-                   'coverage': self.coverage_counts,
-                   'events': dict(self.events) if observed else None,
-                   'counts': {'collision_proxy_lidar': self.events['collision_proxy_lidar'],
+                   'schema_valid': not all_errors,
+                   'validation_errors': all_errors,
+                   'offline_validation': {'jsonl_lines_read': lines_read,
+                                          'coverage_checked': snapshot_available,
+                                          'errors': offline_errors},
+                   'coverage': self.saved_coverage_counts if snapshot_available else None,
+                   'events': reported_events,
+                   'counts': {'collision_proxy_lidar': (self.events['collision_proxy_lidar']
+                                                        if self.scan_seen else None),
                               'contact_confirmed': None,
-                              'stuck_events': self.events['stuck_events'],
-                              'recovery_attempts_local': self.events['recovery_attempts_local'],
+                              'stuck_events': self.events['stuck_events'] if observed else None,
+                              'recovery_attempts_local': (self.events['recovery_attempts_local']
+                                                          if observed else None),
+                              'navigation_goal_failures': (self.events['navigation_goal_failures']
+                                                           if observed else None),
                               'recovery_attempts_nav2': None,
-                              'completed_returns': len(self.events['return_seconds'])} if observed else None,
+                              'completed_returns': (len(self.events['return_seconds'])
+                                                    if observed else None)},
                    'failure_count': len(self.events['failures']) if observed else None,
                    'failure_causes': sorted(set(self.events['failures'])) if observed else None,
                    'failure_cause_counts': dict(sorted(failure_counts.items())) if observed else None,
@@ -311,17 +358,90 @@ class MetricsRecorder(Node):
                                         'contact_confirmed': 'unavailable_no_contact_sensor',
                                         'stuck_events': 'supervisor_progress_detection',
                                         'recovery_attempts_local': 'supervisor_event_count',
+                                        'navigation_goal_failures': 'transient_nav2_goal_failure',
                                         'recovery_attempts_nav2': 'unavailable_no_nav2_event_subscription'},
                    'availability': {'contact_confirmed': 'unavailable_no_contact_sensor',
                                     'nav2_recoveries': 'unavailable_no_nav2_event_subscription',
                                     'local_recoveries': ('observed_event_stream' if observed else
                                                          'unavailable_no_events_observed'),
-                                    'collision_proxy_lidar': ('observed_event_stream' if observed else
-                                                              'unavailable_no_events_observed'),
+                                    'collision_proxy_lidar': ('observed_scan' if self.scan_seen else
+                                                              'unavailable_no_scan_observed'),
                                     'return_duration': ('observed' if self.events['return_seconds'] else
                                                         'unavailable_no_completed_return_event'),
-                                    'coverage': 'observed' if self.grid_pair else 'unavailable_no_paired_grids'}}
+                                    'coverage': ('invalid_snapshot' if previous_snapshot_errors else
+                                                 'observed' if snapshot_available else
+                                                 'not_written_invalid_jsonl' if offline_errors else
+                                                 'unavailable_no_paired_grids')}}
         self._write_json(self.summary_path, summary)
+
+    @classmethod
+    def _validate_saved_jsonl(cls, path, expected_count):
+        errors = []
+        count = 0
+        try:
+            with open(path, 'rb') as stream:
+                for count, raw_line in enumerate(stream, 1):
+                    if not raw_line.endswith(b'\n'):
+                        errors.append('jsonl_line_%d_missing_newline' % count)
+                    try:
+                        row = json.loads(raw_line.decode('utf-8'),
+                                         parse_constant=lambda value: cls._reject_nonfinite(value))
+                    except (UnicodeDecodeError, ValueError):
+                        errors.append('jsonl_line_%d_invalid_json' % count)
+                        continue
+                    if not isinstance(row, dict):
+                        errors.append('jsonl_line_%d_invalid_sample' % count)
+                        continue
+                    sample_errors = cls._validate_sample(row)
+                    errors.extend('jsonl_line_%d_%s' % (count, error) for error in sample_errors)
+                    if row.get('schema_valid') is not (not sample_errors) or row.get('schema_errors') != sample_errors:
+                        errors.append('jsonl_line_%d_schema_result_mismatch' % count)
+        except OSError:
+            errors.append('jsonl_unavailable')
+        if count != expected_count:
+            errors.append('jsonl_sample_count_mismatch')
+        return count, errors
+
+    @classmethod
+    def _validate_saved_coverage(cls, path, expected_counts):
+        try:
+            with open(path, encoding='utf-8') as stream:
+                snapshot = json.load(stream, parse_constant=cls._reject_nonfinite)
+        except (OSError, UnicodeDecodeError, ValueError):
+            return ['coverage_snapshot_unavailable_or_invalid_json']
+        if not isinstance(snapshot, dict) or snapshot.get('schema_version') != 1:
+            return ['coverage_snapshot_invalid_header']
+        grid = snapshot.get('grid')
+        if not isinstance(grid, dict):
+            return ['coverage_snapshot_invalid_grid']
+        width, height = grid.get('width'), grid.get('height')
+        if (type(width) is not int or type(height) is not int or width <= 0 or height <= 0 or
+                cls._finite(grid.get('resolution')) is None or grid['resolution'] <= 0):
+            return ['coverage_snapshot_invalid_geometry']
+        mapped, coverage = snapshot.get('map_data'), snapshot.get('coverage_data')
+        size = width * height
+        if (not isinstance(mapped, list) or not isinstance(coverage, list) or
+                len(mapped) != size or len(coverage) != size):
+            return ['coverage_snapshot_invalid_size']
+        if (any(type(value) is not int or not -1 <= value <= 100 for value in mapped) or
+                any(type(value) is not int or value not in (-1, 0, 100) for value in coverage)):
+            return ['coverage_snapshot_invalid_cells']
+        if any((0 <= mapped[i] < 25) != (value in (0, 100))
+               for i, value in enumerate(coverage)):
+            return ['coverage_snapshot_map_mask_mismatch']
+        free = sum(value in (0, 100) for value in coverage)
+        visited = sum(value == 100 for value in coverage)
+        calculated = {'known_free_cells': free, 'visited_cells': visited,
+                      'percent': 100.0*visited/free if free else None}
+        if snapshot.get('free_threshold') != 25 or snapshot.get('counts') != calculated:
+            return ['coverage_snapshot_counts_mismatch']
+        if expected_counts != calculated:
+            return ['coverage_summary_counts_mismatch']
+        return []
+
+    @staticmethod
+    def _reject_nonfinite(value):
+        raise ValueError('non-finite JSON constant: ' + value)
 
     @staticmethod
     def _write_json(path, payload):

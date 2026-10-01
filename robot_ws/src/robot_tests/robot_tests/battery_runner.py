@@ -161,7 +161,7 @@ class BatteryCycleRunner(Node):
                   'elapsed_seconds': round(time.monotonic()-self.started, 2),
                   'states': self.states, 'return_distance_m': self.return_distance,
                   'dock_assessment': self.dock_assessment,
-                  'dock_reference_note': 'Virtual zone at the initial robot pose; no alignment or physical contact with base_charging is measured. The SDF dock center is 0.63 m from the robot spawn.',
+                  'dock_reference_note': 'Virtual proximity zone around the initial robot pose, aligned with the SDF charging pad. A stationary dwell is measured; physical contact sensing is not modeled.',
                   'battery_percent': {'return_start': self.battery_at_return,
                                       'charge_start': self.battery_at_charge_start,
                                       'charge_peak': self.charge_peak_percent,
