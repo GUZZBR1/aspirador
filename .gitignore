@@ -1,6 +1,9 @@
 robot_ws/build/
 robot_ws/install/
 robot_ws/log/
+build/
+install/
+log/
 robot_ws/src/robot_navigation/maps/*.pgm
 robot_ws/src/robot_navigation/maps/*.yaml
 results/**

@@ -10,11 +10,13 @@ Workspace modular ROS 2 Jazzy + Gazebo Harmonic para Ubuntu 24.04 no WSL2. O MVP
 ./scripts/run_mvp.sh
 ```
 
-O comando padrão abre Gazebo e RViz, inicia a casa, o aspirador na base, SLAM Toolbox, Nav2, EKF, supervisor e telemetria. Para rodar sem janela gráfica:
+O comando padrão abre Gazebo e RViz, inicia a casa, o aspirador na base, SLAM Toolbox, Nav2, EKF, supervisor e telemetria. No WSL2, use WSLg (com `WAYLAND_DISPLAY` ou `DISPLAY` configurado) ou um X server no Windows. Não é necessária uma GPU NVIDIA; para forçar renderização por software Mesa, rode `LIBGL_ALWAYS_SOFTWARE=1 ./scripts/run_mvp.sh`. Sem display, o script informa o requisito antes de iniciar; para rodar sem janela gráfica:
 
 ```bash
 ./scripts/run_mvp.sh headless:=true
 ```
+
+É possível selecionar um mundo SDF alternativo com `world:=/caminho/absoluto/arquivo.sdf`.
 
 O primeiro ciclo começa sem mapa. Para salvar a casa mapeada, em outro terminal execute:
 
@@ -37,11 +39,21 @@ Use `2D Pose Estimate` no RViz para inicializar o AMCL quando necessário. Mapas
 ```bash
 ./scripts/run_mobility_tests.sh
 ./scripts/run_battery_cycle_test.sh
+./scripts/run_physics_tests.sh
 ```
 
-O teste de mobilidade inicia SLAM e Nav2, deixa a exploração autônoma mapear primeiro, pausa o supervisor e então testa avanço, ré, giro e objetivos nos cenários da casa. O teste de bateria usa limiares altos apenas para encurtar o ciclo e verifica saída da base, retorno por pontos já percorridos, carga e retomada. O limiar de operação normal continua configurado em 20%.
+O teste de mobilidade inicia SLAM e Nav2, deixa a exploração autônoma mapear, pausa o supervisor e move Nav2 para uma pose inicial definida antes de cada cenário. Use `scenario_name:=piso_normal` (ou outro nome em `mobility.json`) para testar um caso isolado; cada execução do launch inicia simulador novo. A meta da soleira exige comprovação de travessia frontal em pose Gazebo, não apenas sucesso do Nav2. O teste de bateria usa limiares altos para encurtar o ciclo, registra proximidade/velocidade do docking virtual, aumento de carga e retomada. O limiar normal continua em 20%. O teste físico roda em dois mundos isolados: soleira direta e passagem sob a cama.
 
-Os relatórios ficam em `results/mobility_report.json` e `results/battery_report.json`; cada execução também grava amostras JSONL em `results/run_*.jsonl`. O log de colisões é um proxy de proximidade LiDAR, não um sensor de contato.
+Os relatórios ficam em `results/mobility_report.json`, `results/battery_report.json`, `results/threshold_report.json` e `results/bed_clearance_report.json`. Cada gravação de telemetria cria `run_*.jsonl`, `run_*_summary.json` e, quando `/map` e `/coverage/grid` coincidem, `run_*_coverage.json` com metadados e os dados que permitem refazer as contagens. Valores ausentes permanecem `null` com disponibilidade declarada. Proximidade LiDAR é um proxy de colisão; não há sensor de contato físico. O docking do supervisor também é uma zona virtual na pose inicial do robô, sem alinhamento ou contato físico com a base SDF.
+
+### Checklist visual no WSL2
+
+1. Rode `./scripts/run_mvp.sh` e confirme que o mundo `casa` aparece no Gazebo com o robô sobre a base verde.
+2. No RViz, confirme os frames `map`, `odom` e `base_link`, o mapa e `/scan` atualizando, e a grade `Coverage` em `/coverage/grid`.
+3. Em outro terminal, confirme telemetria e estado com `ros2 topic echo /battery_state --once` e `ros2 topic echo /robot/state --once`; confira também `/coverage/percent`.
+4. Confirme que a pose do robô acompanha o movimento no RViz e que não há erros de TF, plugin Gazebo ou display nos terminais.
+
+Se o display não iniciar, confira WSLg (`echo "$WAYLAND_DISPLAY $DISPLAY"`) ou o endereço/firewall do X server. Para diagnosticar os tópicos sem janelas use `./scripts/run_mvp.sh headless:=true`. A verificação headless não substitui a inspeção visual; não há sensor de contato físico e a visualização da bateria/estado é feita pelos tópicos ROS.
 
 ## Pacotes e interfaces
 
@@ -56,10 +68,12 @@ Interfaces principais: `/cmd_vel`, `/scan`, `/imu/data`, `/odometry/filtered`, `
 
 ## Validação atual
 
-O workspace compilou no WSL. O Gazebo Harmonic desta instalação publica o relógio em `/world/casa/clock`; o bridge encaminha esse tópico para `/clock`, usado pelo EKF, SLAM e Nav2.
+O workspace compilou com ROS 2 Jazzy no WSL e os seis pacotes do workspace. Nesta instalação, Gazebo Harmonic publica o relógio em `/world/casa/clock`; a ponte o encaminha para `/clock`, usado por EKF, SLAM e Nav2.
 
-O ciclo headless de bateria passou em 116,8 s: `EXPLORING → RETURNING_TO_DOCK → DOCKING → CHARGING → EXPLORING`, com retorno de 2,44 m. O mapa foi salvo em PGM/YAML (161 × 120 células, 5 cm/célula) e carregado depois por `map_server` com AMCL em `slam:=false`.
+Em 30/09/2026, os ensaios físicos dedicados passaram: a soleira de 12 mm foi atravessada em linha reta e o robô parou assentado depois dela; o percurso sob a cama passou com folga mínima calculada de 9 cm. O teste de ciclo da bateria passou por `EXPLORING → RETURNING_TO_DOCK → DOCKING → CHARGING → EXPLORING`, confirmou aumento de carga e retomada. O docking continua sendo uma zona virtual; estes resultados não validam contato com uma base física.
 
-A suíte mais recente de mobilidade registrou 7 sucessos e 4 falhas em `results/mobility_report.json`. Passaram avanço (0,219 m), ré (-0,306 m), giro (2,412 rad), meta após a soleira, corredor, cadeira e rejeição do objetivo fora do mapa. Expiraram os objetivos de piso normal, tapete, canto e obstáculo frontal. Os cenários usam metas Nav2 em uma execução compartilhada; estes timeouts indicam que a navegação e o isolamento dos testes precisam de correção e não comprovam falha mecânica isolada. A telemetria registrou 30,97 m de odometria, 9,90% da área livre conhecida visitada e 62,8% de bateria após 357 s simulados. A meta do teste de soleira permite desvio e ainda não comprova subida frontal direta; a travessia sob a cama também não foi validada por cenário dedicado.
+O executor de mobilidade inicia um simulador limpo por cenário, permite selecionar um cenário isolado e grava poses, meta, rota planejada e resultado, distinguindo meta inválida, timeout e falha Nav2. Os ensaios isolados de `piso_normal`, `tapete`, `soleira_12mm`, `porta_corredor`, `cadeira` e `canto` passaram; os controles de ré, giro e avanço também passaram com warmup de 20 s. `obstaculo_frontal` foi validado em três execuções isoladas consecutivas com `warmup_seconds:=0.0`: Nav2 chegou à meta sem recuperação, acionou as zonas SlowZone esperadas e a trajetória medida manteve pelo menos 31 cm entre o centro do robô e a caixa do obstáculo (aprox. 7 cm além do raio Nav2 configurado de 24 cm). Os relatórios estão em `results/issue1/obstaculo_frontal_spawn_start_pass_20261001.json`, `results/issue1/obstaculo_frontal_spawn_start_pass_before_repeat_20261001.json` e `results/issue1/obstaculo_frontal_spawn_start_pass_final_20261001.json`. O cenário inclui um waypoint de preparação, e o runner só aceita o setup quando Nav2 informa sucesso e a pose/rotação respeitam a tolerância. O warmup autônomo padrão de 120 s não foi validado: sob concorrência com outro Gazebo, uma tentativa travou no percurso e outra excedeu o prazo ao aguardar o servidor `compute_path_to_pose`. Essas execuções são preservadas como falhas, não ocultadas pelos três passes isolados. O relatório conserva poses, distância restante, estado e código Nav2 quando disponíveis; timeout não é classificado como falha mecânica e a simulação não confirma contato físico. O teste da soleira nesta suíte não substitui o ensaio direto dedicado.
 
-O lançamento gráfico padrão (`./scripts/run_mvp.sh`) iniciou Gazebo GUI e RViz no WSL, além de SLAM, Nav2 e exploração autônoma. Os testes automatizados continuam usando `headless:=true`.
+A exploração autônoma percorreu as três regiões separadas pelas paredes da casa: os registros de pose incluíram amostras na sala oeste e nas duas salas a leste. A execução isolada mais recente registrou 1.483 de 17.477 células livres visitadas (8,49%) ao atingir o limite de 360 s simulado; a exploração permaneceu em `COVERING` e não completou a limpeza integral. `results/issue5/run_20260930T235330_790796Z_summary.json` e o snapshot associado preservam contagens, grade e eventos. Contato físico e contagens de recuperação Nav2 são `null` quando não observáveis. O teste de cama planeja sobre um mapa estático de fixture com pernas predefinidas; ele valida rota e folga física, não percepção online das pernas.
+
+O lançamento gráfico foi iniciado no WSLg com Gazebo GUI e RViz; o checklist visual acima ainda requer conferência manual dos painéis e frames. Um contexto GLX no display atual foi aberto com `LIBGL_ALWAYS_SOFTWARE=1` e reportou `llvmpipe` do Mesa, comprovando o caminho de renderização por software sem usar a GPU NVIDIA. O teste não substitui a inspeção visual do lançamento completo do Gazebo/RViz, que ainda precisa ser conferida na janela.

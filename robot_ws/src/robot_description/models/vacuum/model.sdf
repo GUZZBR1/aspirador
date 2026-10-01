@@ -8,25 +8,31 @@
       </inertial>
       <collision name="chassis_collision"><pose>0 0 0.067 0 0 0</pose><geometry><box><size>0.32 0.19 0.072</size></box></geometry></collision>
       <visual name="chassis"><pose>0 0 0.067 0 0 0</pose><geometry><box><size>0.32 0.19 0.072</size></box></geometry><material><ambient>0.18 0.22 0.24 1</ambient><diffuse>0.18 0.22 0.24 1</diffuse></material></visual>
-      <!-- Nose wedge has a physical contact face; its tilt is a measured design parameter. -->
-      <!-- Longer, low leading ramp reaches within 4 mm of the flat floor and
-           overlaps the 12 mm threshold, allowing the treads to pull the nose up. -->
-      <collision name="nose_ramp_collision"><pose>0.155 0 0.025 0 0.25 0</pose><geometry><box><size>0.14 0.18 0.020</size></box></geometry></collision>
-      <visual name="nose_ramp"><pose>0.155 0 0.025 0 0.25 0</pose><geometry><box><size>0.14 0.18 0.020</size></box></geometry><material><ambient>0.35 0.40 0.42 1</ambient><diffuse>0.35 0.40 0.42 1</diffuse></material></visual>
+      <!-- The shallow nose bevel meets a 12 mm vertical edge below its top and
+           presents an upward-facing contact normal as the treads push forward. -->
+      <collision name="nose_ramp_collision"><pose>0.155 0 0.026 0 -0.20 0</pose><geometry><box><size>0.14 0.18 0.020</size></box></geometry></collision>
+      <visual name="nose_ramp"><pose>0.155 0 0.026 0 -0.20 0</pose><geometry><box><size>0.14 0.18 0.020</size></box></geometry><material><ambient>0.35 0.40 0.42 1</ambient><diffuse>0.35 0.40 0.42 1</diffuse></material></visual>
     </link>
     <link name="left_track">
       <pose>0 0.145 0 0 0 0</pose><inertial><pose>0 0 0.045 0 0 0</pose><mass>0.40</mass><inertia><ixx>0.001</ixx><iyy>0.004</iyy><izz>0.004</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
-      <!-- 5 mm contact overlap represents belt compliance and prevents a
-           numerically exact tangent from losing all traction in the solver. -->
-      <collision name="track_contact"><pose>0 0 0.038 0 0 0</pose><geometry><box><size>0.35 0.065 0.086</size></box></geometry><surface><friction><ode><mu>0.8</mu><mu2>1.2</mu2><fdir1>1 0 0</fdir1></ode></friction></surface></collision>
-      <visual name="track_visual"><pose>0 0 0.043 0 0 0</pose><geometry><box><size>0.35 0.065 0.086</size></box></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
+      <!-- Flat tread center plus rounded idler ends gives the modeled belt a
+           climbable profile while preserving its 0.35 x 0.065 m footprint. -->
+      <collision name="track_contact"><pose>0 0 0.038 0 0 0</pose><geometry><box><size>0.26 0.065 0.076</size></box></geometry><surface><friction><ode><mu>0.8</mu><mu2>1.2</mu2><fdir1>1 0 0</fdir1></ode></friction></surface></collision>
+      <collision name="front_idler_contact"><pose>0.13 0 0.043 1.570796 0 0</pose><geometry><cylinder><radius>0.043</radius><length>0.065</length></cylinder></geometry><surface><friction><ode><mu>0.8</mu><mu2>1.2</mu2><fdir1>1 0 0</fdir1></ode></friction></surface></collision>
+      <collision name="rear_idler_contact"><pose>-0.13 0 0.043 1.570796 0 0</pose><geometry><cylinder><radius>0.043</radius><length>0.065</length></cylinder></geometry><surface><friction><ode><mu>0.8</mu><mu2>1.2</mu2><fdir1>1 0 0</fdir1></ode></friction></surface></collision>
+      <visual name="track_visual"><pose>0 0 0.043 0 0 0</pose><geometry><box><size>0.26 0.065 0.076</size></box></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
+      <visual name="front_idler_visual"><pose>0.13 0 0.043 1.570796 0 0</pose><geometry><cylinder><radius>0.043</radius><length>0.065</length></cylinder></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
+      <visual name="rear_idler_visual"><pose>-0.13 0 0.043 1.570796 0 0</pose><geometry><cylinder><radius>0.043</radius><length>0.065</length></cylinder></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
     </link>
     <joint name="left_track_mount" type="fixed"><parent>base_link</parent><child>left_track</child></joint>
     <link name="right_track">
       <pose>0 -0.145 0 0 0 0</pose><inertial><pose>0 0 0.045 0 0 0</pose><mass>0.40</mass><inertia><ixx>0.001</ixx><iyy>0.004</iyy><izz>0.004</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
-      <!-- Same 5 mm compliant contact overlap as the other track. -->
-      <collision name="track_contact"><pose>0 0 0.038 0 0 0</pose><geometry><box><size>0.35 0.065 0.086</size></box></geometry><surface><friction><ode><mu>0.8</mu><mu2>1.2</mu2><fdir1>1 0 0</fdir1></ode></friction></surface></collision>
-      <visual name="track_visual"><pose>0 0 0.043 0 0 0</pose><geometry><box><size>0.35 0.065 0.086</size></box></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
+      <collision name="track_contact"><pose>0 0 0.038 0 0 0</pose><geometry><box><size>0.26 0.065 0.076</size></box></geometry><surface><friction><ode><mu>0.8</mu><mu2>1.2</mu2><fdir1>1 0 0</fdir1></ode></friction></surface></collision>
+      <collision name="front_idler_contact"><pose>0.13 0 0.043 1.570796 0 0</pose><geometry><cylinder><radius>0.043</radius><length>0.065</length></cylinder></geometry><surface><friction><ode><mu>0.8</mu><mu2>1.2</mu2><fdir1>1 0 0</fdir1></ode></friction></surface></collision>
+      <collision name="rear_idler_contact"><pose>-0.13 0 0.043 1.570796 0 0</pose><geometry><cylinder><radius>0.043</radius><length>0.065</length></cylinder></geometry><surface><friction><ode><mu>0.8</mu><mu2>1.2</mu2><fdir1>1 0 0</fdir1></ode></friction></surface></collision>
+      <visual name="track_visual"><pose>0 0 0.043 0 0 0</pose><geometry><box><size>0.26 0.065 0.076</size></box></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
+      <visual name="front_idler_visual"><pose>0.13 0 0.043 1.570796 0 0</pose><geometry><cylinder><radius>0.043</radius><length>0.065</length></cylinder></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
+      <visual name="rear_idler_visual"><pose>-0.13 0 0.043 1.570796 0 0</pose><geometry><cylinder><radius>0.043</radius><length>0.065</length></cylinder></geometry><material><ambient>0.08 0.09 0.10 1</ambient><diffuse>0.08 0.09 0.10 1</diffuse></material></visual>
     </link>
     <joint name="right_track_mount" type="fixed"><parent>base_link</parent><child>right_track</child></joint>
     <link name="lidar_link"><pose>0 0 0.133 0 0 0</pose><inertial><mass>0.02</mass><inertia><ixx>0.00001</ixx><iyy>0.00001</iyy><izz>0.00001</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia></inertial>
@@ -47,5 +53,11 @@
     </plugin>
     <plugin name="gz::sim::systems::TrackController" filename="gz-sim-track-controller-system"><link>left_track</link><min_velocity>-0.35</min_velocity><max_velocity>0.35</max_velocity><max_acceleration>0.4</max_acceleration></plugin>
     <plugin name="gz::sim::systems::TrackController" filename="gz-sim-track-controller-system"><link>right_track</link><min_velocity>-0.35</min_velocity><max_velocity>0.35</max_velocity><max_acceleration>0.4</max_acceleration></plugin>
+    <plugin name="gz::sim::systems::PosePublisher" filename="gz-sim-pose-publisher-system">
+      <topic>/model/aspirador/pose</topic>
+      <use_pose_vector_msg>true</use_pose_vector_msg>
+      <publish_model_pose>true</publish_model_pose>
+      <update_frequency>30</update_frequency>
+    </plugin>
   </model>
 </sdf>

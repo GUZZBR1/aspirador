@@ -7,6 +7,11 @@ Visualization Manager:
     - Class: rviz_default_plugins/Map
       Name: Map
       Topic: {Value: /map}
+    - Class: rviz_default_plugins/Map
+      Name: Coverage
+      Topic: {Value: /coverage/grid}
+      Alpha: 0.55
+      Color Scheme: costmap
     - Class: rviz_default_plugins/LaserScan
       Name: LaserScan
       Topic: {Value: /scan}

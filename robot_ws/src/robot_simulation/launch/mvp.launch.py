@@ -16,23 +16,24 @@ def generate_launch_description():
     navigation_enabled = LaunchConfiguration('navigation_enabled')
     autonomy_enabled = LaunchConfiguration('autonomy_enabled')
     metrics_enabled = LaunchConfiguration('metrics_enabled')
+    localization_enabled = LaunchConfiguration('localization_enabled')
     battery_low_percent = LaunchConfiguration('battery_low_percent')
     battery_resume_percent = LaunchConfiguration('battery_resume_percent')
-    world = PathJoinSubstitution([FindPackageShare('robot_description'), 'worlds', 'casa.sdf'])
+    world = LaunchConfiguration('world')
     sim_launch = PathJoinSubstitution([FindPackageShare('ros_gz_sim'), 'launch', 'gz_sim.launch.py'])
     nav_launch = PathJoinSubstitution([FindPackageShare('robot_navigation'), 'launch', 'navigation.launch.py'])
 
     gz_gui = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(sim_launch),
-        launch_arguments={'gz_args': ["-r -v 3 ", world]}.items(),
+        launch_arguments={'gz_args': ["-r -v 3 \"", world, "\""]}.items(),
         condition=UnlessCondition(headless))
     gz_headless = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(sim_launch),
-        launch_arguments={'gz_args': ["-s -r -v 3 ", world]}.items(),
+        launch_arguments={'gz_args': ["-s -r -v 3 \"", world, "\""]}.items(),
         condition=IfCondition(headless))
 
     robot_description = Command([
-        'xacro ', PathJoinSubstitution([FindPackageShare('robot_description'), 'urdf', 'aspirador.urdf.xacro'])])
+        'xacro "', PathJoinSubstitution([FindPackageShare('robot_description'), 'urdf', 'aspirador.urdf.xacro']), '"'])
     state_publisher = Node(package='robot_state_publisher', executable='robot_state_publisher',
         name='robot_state_publisher', output='screen', parameters=[{
             'robot_description': robot_description, 'use_sim_time': use_sim_time}])
@@ -50,7 +51,8 @@ def generate_launch_description():
     cmd_vel_adapter = Node(package='robot_simulation', executable='cmd_vel_adapter.py',
         name='cmd_vel_adapter', output='screen')
     ekf = Node(package='robot_localization', executable='ekf_node', name='ekf_filter_node',
-        output='screen', parameters=[PathJoinSubstitution([FindPackageShare('robot_navigation'), 'config', 'ekf.yaml']), {'use_sim_time': use_sim_time}])
+        output='screen', parameters=[PathJoinSubstitution([FindPackageShare('robot_navigation'), 'config', 'ekf.yaml']), {'use_sim_time': use_sim_time}],
+        condition=IfCondition(localization_enabled))
 
     nav = IncludeLaunchDescription(PythonLaunchDescriptionSource(nav_launch), launch_arguments={
         'use_sim_time': use_sim_time, 'slam': slam, 'map': map_file,
@@ -72,8 +74,11 @@ def generate_launch_description():
         DeclareLaunchArgument('navigation_enabled', default_value='true'),
         DeclareLaunchArgument('autonomy_enabled', default_value='true'),
         DeclareLaunchArgument('metrics_enabled', default_value='true'),
+        DeclareLaunchArgument('localization_enabled', default_value='true'),
         DeclareLaunchArgument('battery_low_percent', default_value='20.0'),
         DeclareLaunchArgument('battery_resume_percent', default_value='95.0'),
+        DeclareLaunchArgument('world', default_value=PathJoinSubstitution(
+            [FindPackageShare('robot_description'), 'worlds', 'casa.sdf'])),
         gz_gui, gz_headless, state_publisher,
         TimerAction(period=4.0, actions=[bridge, cmd_vel_adapter, ekf]),
         TimerAction(period=10.0, actions=[nav]),

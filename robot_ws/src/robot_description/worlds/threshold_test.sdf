@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="casa">
+    <physics name="threshold_physics" type="ignored"><max_step_size>0.002</max_step_size><real_time_factor>1.0</real_time_factor></physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"><render_engine>ogre2</render_engine></plugin>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+    <scene><ambient>0.65 0.65 0.65 1</ambient><background>0.86 0.88 0.90 1</background></scene>
+    <light name="sun" type="directional"><pose>0 0 8 0 0 0</pose><direction>-0.4 0.2 -1</direction><diffuse>0.8 0.8 0.8 1</diffuse></light>
+    <model name="floor"><static>true</static><link name="floor_link">
+      <collision name="floor_collision"><pose>0 0 -0.04 0 0 0</pose><geometry><box><size>4.0 1.2 0.08</size></box></geometry></collision>
+      <visual name="floor_visual"><pose>0 0 -0.04 0 0 0</pose><geometry><box><size>4.0 1.2 0.08</size></box></geometry></visual>
+    </link></model>
+    <!-- The lane is 0.68 m wide. Its threshold spans the entire lane, so the
+         0.355 m robot cannot drive around either end. -->
+    <model name="lane_walls"><static>true</static><link name="walls">
+      <collision name="left"><pose>0 0.37 0.10 0 0 0</pose><geometry><box><size>3.8 0.06 0.20</size></box></geometry></collision>
+      <visual name="left_v"><pose>0 0.37 0.10 0 0 0</pose><geometry><box><size>3.8 0.06 0.20</size></box></geometry></visual>
+      <collision name="right"><pose>0 -0.37 0.10 0 0 0</pose><geometry><box><size>3.8 0.06 0.20</size></box></geometry></collision>
+      <visual name="right_v"><pose>0 -0.37 0.10 0 0 0</pose><geometry><box><size>3.8 0.06 0.20</size></box></geometry></visual>
+    </link></model>
+    <model name="soleira_12mm"><static>true</static><link name="threshold">
+      <collision name="threshold_collision"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.12 0.68 0.012</size></box></geometry></collision>
+      <visual name="threshold_visual"><pose>0 0 0.006 0 0 0</pose><geometry><box><size>0.12 0.68 0.012</size></box></geometry></visual>
+    </link></model>
+    <include><uri>model://vacuum</uri><name>aspirador</name><pose>-0.65 0 0 0 0 0</pose></include>
+  </world>
+</sdf>

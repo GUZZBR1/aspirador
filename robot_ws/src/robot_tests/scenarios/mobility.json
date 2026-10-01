@@ -1,10 +1,1 @@
-[
-  {"name":"piso_normal","goal_map":[0.45,-0.15],"expect":"success"},
-  {"name":"tapete","goal_map":[0.45,1.95],"expect":"success"},
-  {"name":"soleira_12mm","goal_map":[2.50,1.70],"expect":"success"},
-  {"name":"porta_corredor","goal_map":[3.75,1.75],"expect":"success"},
-  {"name":"cadeira","goal_map":[2.35,3.35],"expect":"success"},
-  {"name":"canto","goal_map":[-0.35,4.45],"expect":"success"},
-  {"name":"obstaculo_frontal","goal_map":[0.35,3.20],"expect":"success"},
-  {"name":"tentativa_bloqueada_recovery","goal_map":[3.10,5.25],"expect":"failure"}
-]
+[{"name":"piso_normal","start_map":[0.25,0.2],"goal_map":[0.45,-0.15],"expect":"success","feature_world":{"name":"floor","pose":[0.0,0.0],"size":[8.2,6.2]}},{"name":"tapete","start_map":[0.2,1.0],"goal_map":[0.2,1.95],"setup_waypoints_map":[[2.0,1.75],[2.9,1.75],[0.2,0.4]],"expect":"success","feature_world":{"name":"tapete","pose":[-2.7,-0.2],"size":[1.7,1.15]}},{"name":"soleira_12mm","start_map":[2.25,1.7],"goal_map":[3.55,1.7],"expect":"success","feature_world":{"name":"soleira_12mm","pose":[0.0,-0.4],"size":[0.12,0.68],"height":0.012,"crossing_axis":"x"},"requires_frontal_crossing":true},{"name":"porta_corredor","start_map":[2.25,1.75],"goal_map":[3.75,1.75],"expect":"success","feature_world":{"name":"house_walls/doorway","pose":[0.0,-0.4],"size":[0.12,1.2]}},{"name":"cadeira","start_map":[1.2,2.65],"goal_map":[2.35,3.35],"expect":"success","feature_world":{"name":"chair","pose":[-1.45,1.2],"size":[0.42,0.42]}},{"name":"canto","start_map":[0.35,3.85],"goal_map":[-0.35,4.45],"expect":"success","feature_world":{"name":"house_walls/north_west_corner","pose":[-4.05,3.05],"size":[0.12,0.12]}},{"name":"obstaculo_frontal","start_map":[2.0,1.4],"goal_map":[2.4,3.4],"expect":"success","feature_world":{"name":"obstaculo_pequeno","pose":[-0.6,0.55],"size":[0.3,0.3],"height":0.25},"setup_waypoints_map":[[2.3,1.4]]},{"name":"tentativa_bloqueada_recovery","start_map":[2.25,4.45],"goal_map":[3.1,5.25],"expect":"failure","feature_world":{"name":"house_walls/north","pose":[0.0,3.05],"size":[8.2,0.12]}}]

@@ -18,7 +18,6 @@ amcl:
 map_server:
   ros__parameters:
     use_sim_time: true
-    yaml_filename: ''
 controller_server:
   ros__parameters:
     use_sim_time: true
@@ -149,17 +148,31 @@ collision_monitor:
     cmd_vel_out_topic: cmd_vel
     transform_tolerance: 0.2
     source_timeout: 1.0
+    state_topic: collision_monitor_state
     base_shift_correction: false
     stop_pub_timeout: 2.0
     enable_stamped_cmd_vel: false
-    polygons: [StopZone]
+    polygons: [StopZone, SlowZone]
     StopZone:
       type: polygon
-      points: "[[0.32, 0.22], [0.32, -0.22], [-0.22, -0.22], [-0.22, 0.22]]"
+      # Cover the chassis and nose ramp with a small safety margin. The local
+      # costmap handles path clearance; an oversized stop polygon blocks turns
+      # around obstacles already avoided by Nav2.
+      points: "[[0.26, 0.19], [0.26, -0.19], [-0.19, -0.19], [-0.19, 0.19]]"
       action_type: stop
       min_points: 4
       visualize: true
       polygon_pub_topic: collision_monitor/stop_zone
+    SlowZone:
+      type: polygon
+      # Slow the robot before an obstacle enters the emergency stop envelope,
+      # leaving Nav2 time to turn around it while retaining the close stop zone.
+      points: "[[0.52, 0.32], [0.52, -0.32], [-0.19, -0.32], [-0.19, 0.32]]"
+      action_type: slowdown
+      slowdown_ratio: 0.5
+      min_points: 4
+      visualize: true
+      polygon_pub_topic: collision_monitor/slow_zone
     observation_sources: [scan]
     scan:
       type: scan
